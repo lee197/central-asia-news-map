@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>中亚新闻地图</title>
+<style>
+  :root {
+    --bg-deep: #0F1620;
+    --surface: #1A2332;
+    --surface-hover: #1F2A3E;
+    --surface-active: #243248;
+    --border: #2A3548;
+    --text-primary: #E8EEF5;
+    --text-secondary: #8B99AD;
+    --text-tertiary: #5A6779;
+    --accent: #3B9EFF;
+    --accent-hover: #5BB0FF;
+    --sand: #E8B568;
+    --color-kz: #3B9EFF;
+    --color-uz: #E8B568;
+    --color-kg: #EF6B6B;
+    --color-tj: #A78BFA;
+    --color-tm: #4ADE80;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow: hidden;
+  }
+
+  /* ===== 顶部栏 ===== */
+  .topbar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 56px;
+    background: rgba(26, 35, 50, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    z-index: 100;
+  }
+  .logo {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-right: 24px;
+  }
+  .logo-emoji { margin-right: 6px; }
+  .update-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .topbar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .country-filter {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-deep);
+    border-radius: 8px;
+    padding: 3px;
+    border: 1px solid var(--border);
+  }
+  .country-chip {
+    padding: 5px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .country-chip:hover { color: var(--text-primary); }
+  .country-chip.active {
+    background: var(--surface-active);
+    color: var(--text-primary);
+  }
+  .about-link {
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  .about-link:hover { color: var(--text-primary); }
+
+  /* ===== 主体布局 ===== */
+  .layout {
+    display: flex;
+    height: 100vh;
+    padding-top: 56px;
+  }
+  .map-container {
+    flex: 1;
+    position: relative;
+    background: var(--bg-deep);
+  }
+  #map {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ===== 右侧列表 ===== */
+  .news-panel {
+    width: 360px;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .news-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .news-header-title {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .news-header-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .news-list {
+    flex: 1;
+    overflow-y: auto;
+  }
+  .news-list::-webkit-scrollbar { width: 6px; }
+  .news-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+  .news-item {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.12s;
+    border-left: 3px solid transparent;
+  }
+  .news-item:hover {
+    background: var(--surface-hover);
+  }
+  .news-item.active {
+    background: var(--surface-active);
+    border-left-color: var(--sand);
+  }
+  .news-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
+  }
+  .country-badge {
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 500;
+    font-size: 11px;
+  }
+  .country-badge.kz { background: rgba(59,158,255,0.15); color: var(--color-kz); }
+  .country-badge.uz { background: rgba(232,181,104,0.15); color: var(--color-uz); }
+  .country-badge.kg { background: rgba(239,107,107,0.15); color: var(--color-kg); }
+  .country-badge.tj { background: rgba(167,139,250,0.15); color: var(--color-tj); }
+  .country-badge.tm { background: rgba(74,222,128,0.15); color: var(--color-tm); }
+  .news-item-time {
+    color: var(--text-tertiary);
+  }
+  .news-item-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  .news-item-city {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  /* ===== 弹窗 (InfoWindow 自定义) ===== */
+  .info-card {
+    width: 320px;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    overflow: hidden;
+    color: var(--text-primary);
+    font-family: inherit;
+  }
+  .info-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .info-card-body {
+    padding: 14px 16px;
+  }
+  .info-card-title {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.45;
+    margin-bottom: 10px;
+  }
+  .info-card-summary {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .info-card-source {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-bottom: 14px;
+  }
+  .btn-primary {
+    display: block;
+    width: 100%;
+    padding: 9px 0;
+    text-align: center;
+    background: var(--accent);
+    color: #fff;
+    text-decoration: none;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+
+  /* ===== 加载状态 ===== */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    background: rgba(15, 22, 32, 0.6);
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 50;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  /* 骨架屏 */
+  .skeleton-item {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .skeleton-line {
+    height: 10px;
+    background: linear-gradient(90deg, var(--border), var(--surface-hover), var(--border));
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+  .skeleton-line.w-60 { width: 60%; }
+  .skeleton-line.w-90 { width: 90%; }
+  .skeleton-line.w-40 { width: 40%; }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ===== 关于弹层 ===== */
+  .modal-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    z-index: 9000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    width: 420px;
+    max-width: 90vw;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .modal-head {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .modal-head h2 { font-size: 15px; font-weight: 600; }
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .modal-body { padding: 20px; }
+  .modal-body p {
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .modal-body .meta-line {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+
+  /* 高德默认 InfoWindow 样式覆盖 */
+  .amap-info-content {
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .amap-info-close { display: none !important; }
+  .amap-info-sharp { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- 顶部栏 -->
+<header class="topbar">
+  <div class="logo"><span class="logo-emoji">🌍</span>中亚新闻地图</div>
+  <div class="update-info" id="updateInfo">🔄 更新于刚刚</div>
+  <div class="topbar-right">
+    <div class="country-filter" id="countryFilter">
+      <div class="country-chip active" data-country="ALL">全部</div>
+      <div class="country-chip" data-country="KZ">KZ</div>
+      <div class="country-chip" data-country="UZ">UZ</div>
+      <div class="country-chip" data-country="KG">KG</div>
+      <div class="country-chip" data-country="TJ">TJ</div>
+      <div class="country-chip" data-country="TM">TM</div>
+    </div>
+    <div class="about-link" id="aboutBtn">关于</div>
+  </div>
+</header>
+
+<!-- 主体 -->
+<div class="layout">
+  <div class="map-container">
+    <div id="map"></div>
+    <div class="loading-overlay" id="loadingOverlay">
+      <div class="spinner"></div>
+      <div class="loading-text">正在加载新闻…</div>
+    </div>
+  </div>
+  <aside class="news-panel">
+    <div class="news-header">
+      <div class="news-header-title">最新新闻</div>
+      <div class="news-header-count" id="newsCount">载入中…</div>
+    </div>
+    <div class="news-list" id="newsList">
+      <!-- 骨架屏 -->
+      <div class="skeleton-item">
+        <div class="skeleton-line w-40"></div>
+        <div class="skeleton-line w-90"></div>
+        <div class="skeleton-line w-60"></div>
+      </div>
+      <div class="skeleton-item">
+        <div class="skeleton-line w-40"></div>
+        <div class="skeleton-line w-90"></div>
+        <div class="skeleton-line w-60"></div>
+      </div>
+      <div class="skeleton-item">
+        <div class="skeleton-line w-40"></div>
+        <div class="skeleton-line w-90"></div>
+        <div class="skeleton-line w-60"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- 关于弹层 -->
+<div class="modal-mask" id="aboutModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>关于本站</h2>
+      <button class="modal-close" id="aboutClose">×</button>
+    </div>
+    <div class="modal-body">
+      <p>中亚新闻地图聚合中亚五国（哈萨克斯坦、乌兹别克斯坦、吉尔吉斯斯坦、塔吉克斯坦、土库曼斯坦）的最新新闻，按发生地点呈现于地图上。</p>
+      <p>所有内容由 AI 自动翻译为中文。点击地图上的圆点可查看新闻摘要，点击"查看原文"跳转到原始新闻。</p>
+      <div class="meta-line">
+        数据源：GDELT + 区域媒体 RSS<br>
+        地图：高德地图<br>
+        翻译：Claude AI<br>
+        本页为 MVP 原型，使用模拟数据。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 高德地图 JS API：使用前请替换 YOUR_AMAP_KEY -->
+<script src="https://webapi.amap.com/maps?v=2.0&key=YOUR_AMAP_KEY"></script>
+<script>
+  // ====== 模拟数据（开发完成后替换为 fetch('/api/news')） ======
+  const MOCK_NEWS = [
+    {
+      id: '1', country: 'UZ', city: '塔什干', lat: 41.2995, lng: 69.2401,
+      title_zh: '乌兹别克斯坦与中国签署 50 亿美元新能源合作协议',
+      summary_zh: '两国元首在塔什干会晤，签署总额 50 亿美元的合作协议，涵盖太阳能、风能、核能等多个领域。该协议将推动乌兹别克斯坦能源结构转型。',
+      source: 'Gazeta.uz', source_url: 'https://www.gazeta.uz/',
+      published_at: '2026-04-30T08:00:00Z'
+    },
+    {
+      id: '2', country: 'KZ', city: '阿斯塔纳', lat: 51.1605, lng: 71.4704,
+      title_zh: '哈萨克斯坦总统宣布新一轮经济改革方案',
+      summary_zh: '托卡耶夫总统在国会发表演讲，公布涵盖税制、国企改革和数字经济的综合改革方案，预计未来三年带动 GDP 增长 4%。',
+      source: 'Tengrinews', source_url: 'https://tengrinews.kz/',
+      published_at: '2026-04-30T06:30:00Z'
+    },
+    {
+      id: '3', country: 'KZ', city: '阿拉木图', lat: 43.2389, lng: 76.8897,
+      title_zh: '阿拉木图举办首届中亚科技创新峰会',
+      summary_zh: '来自五国的 300 余家科技企业参展，涵盖人工智能、清洁能源、农业科技等方向，签署合作意向 20 余项。',
+      source: 'Kursiv', source_url: 'https://kursiv.kz/',
+      published_at: '2026-04-30T04:15:00Z'
+    },
+    {
+      id: '4', country: 'KG', city: '比什凯克', lat: 42.8746, lng: 74.5698,
+      title_zh: '吉尔吉斯斯坦比什凯克新国际机场二期工程动工',
+      summary_zh: '机场扩建后年吞吐量将提升至 800 万人次，工程预计 2028 年完工，由中资企业参与建设。',
+      source: '24.kg', source_url: 'https://24.kg/',
+      published_at: '2026-04-30T02:00:00Z'
+    },
+    {
+      id: '5', country: 'TJ', city: '杜尚别', lat: 38.5598, lng: 68.7870,
+      title_zh: '塔吉克斯坦罗贡水电站全部机组并网发电',
+      summary_zh: '罗贡水电站作为世界最高坝水电项目，全部 6 台机组完成并网，年发电量达 170 亿度，将显著改善地区电力供应。',
+      source: 'Asia-Plus', source_url: 'https://asiaplustj.info/',
+      published_at: '2026-04-29T22:00:00Z'
+    },
+    {
+      id: '6', country: 'TM', city: '阿什哈巴德', lat: 37.9601, lng: 58.3261,
+      title_zh: '土库曼斯坦与伊朗签署天然气出口长期协议',
+      summary_zh: '协议期 25 年，年供气量 100 亿立方米，途经伊朗输往南亚市场，将进一步巩固土库曼斯坦能源出口地位。',
+      source: 'Turkmenportal', source_url: 'https://turkmenportal.com/',
+      published_at: '2026-04-29T20:30:00Z'
+    },
+    {
+      id: '7', country: 'UZ', city: '撒马尔罕', lat: 39.6542, lng: 66.9597,
+      title_zh: '撒马尔罕古城修复工程获联合国教科文组织表彰',
+      summary_zh: '历时五年的古城修复工程完成验收，多座帖木儿王朝时期建筑得到保护性修复，成为中亚文化遗产保护典范。',
+      source: 'Gazeta.uz', source_url: 'https://www.gazeta.uz/',
+      published_at: '2026-04-29T18:00:00Z'
+    },
+    {
+      id: '8', country: 'KZ', city: '阿斯塔纳', lat: 51.1605, lng: 71.4704,
+      title_zh: '阿斯塔纳举办上合组织外长会议',
+      summary_zh: '上合组织成员国外长围绕地区安全、经济合作展开讨论，并发布联合声明，强调多边合作的重要性。',
+      source: 'Kazinform', source_url: 'https://www.inform.kz/',
+      published_at: '2026-04-29T15:00:00Z'
+    },
+    {
+      id: '9', country: 'KG', city: '奥什', lat: 40.5283, lng: 72.7985,
+      title_zh: '吉尔吉斯斯坦南部奥什州开通新跨境物流通道',
+      summary_zh: '新通道连接奥什与中国喀什，物流时效缩短 40%，将促进双边贸易和当地农产品出口。',
+      source: 'Kaktus.media', source_url: 'https://kaktus.media/',
+      published_at: '2026-04-29T12:00:00Z'
+    },
+    {
+      id: '10', country: 'UZ', city: '塔什干', lat: 41.3110, lng: 69.2790,
+      title_zh: '塔什干地铁新线路正式通车',
+      summary_zh: '新地铁线全长 19 公里，设 11 座车站，覆盖塔什干东南部主要居住区，预计日均客流量 25 万人次。',
+      source: 'Kun.uz', source_url: 'https://kun.uz/',
+      published_at: '2026-04-29T10:00:00Z'
+    }
+  ];
+
+  const COUNTRY_NAMES = { KZ: '哈萨克斯坦', UZ: '乌兹别克斯坦', KG: '吉尔吉斯斯坦', TJ: '塔吉克斯坦', TM: '土库曼斯坦' };
+  const COUNTRY_COLORS = { KZ: '#3B9EFF', UZ: '#E8B568', KG: '#EF6B6B', TJ: '#A78BFA', TM: '#4ADE80' };
+
+  let map, infoWindow;
+  const markerMap = {};   // id -> marker
+  let currentFilter = 'ALL';
+  let activeId = null;
+
+  // ====== 工具函数 ======
+  function timeAgo(iso) {
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+    return Math.floor(diff / 86400) + ' 天前';
+  }
+
+  function makeMarkerContent(country) {
+    const color = COUNTRY_COLORS[country] || '#3B9EFF';
+    return `<div style="
+      width: 14px; height: 14px;
+      background: ${color};
+      border: 2px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      cursor: pointer;
+      transition: transform 0.15s;
+    "></div>`;
+  }
+
+  function makeInfoCard(news) {
+    const country = news.country.toLowerCase();
+    return `
+      <div class="info-card">
+        <div class="info-card-head">
+          <div class="info-card-meta">
+            <span class="country-badge ${country}">${news.country}</span>
+            <span>${timeAgo(news.published_at)}</span>
+          </div>
+        </div>
+        <div class="info-card-body">
+          <div class="info-card-title">${news.title_zh}</div>
+          <div class="info-card-summary">${news.summary_zh}</div>
+          <div class="info-card-source">📍 ${news.city} · 来源：${news.source}</div>
+          <a href="${news.source_url}" target="_blank" rel="noopener" class="btn-primary">查看原文 →</a>
+        </div>
+      </div>
+    `;
+  }
+
+  // ====== 渲染 ======
+  function renderList(items) {
+    const list = document.getElementById('newsList');
+    document.getElementById('newsCount').textContent = `(${items.length})`;
+    if (items.length === 0) {
+      list.innerHTML = `
+        <div style="padding: 60px 20px; text-align: center; color: var(--text-secondary);">
+          <div style="font-size: 32px; margin-bottom: 12px;">📭</div>
+          <div style="font-size: 13px;">该地区最近暂无新闻</div>
+        </div>`;
+      return;
+    }
+    list.innerHTML = items.map(n => `
+      <div class="news-item ${n.id === activeId ? 'active' : ''}" data-id="${n.id}">
+        <div class="news-item-meta">
+          <span class="country-badge ${n.country.toLowerCase()}">${n.country}</span>
+          <span class="news-item-time">${timeAgo(n.published_at)}</span>
+        </div>
+        <div class="news-item-title">${n.title_zh}</div>
+        <div class="news-item-city">${n.city}</div>
+      </div>
+    `).join('');
+    list.querySelectorAll('.news-item').forEach(el => {
+      el.addEventListener('click', () => focusNews(el.dataset.id));
+    });
+  }
+
+  function renderMarkers(items) {
+    Object.values(markerMap).forEach(m => map.remove(m));
+    Object.keys(markerMap).forEach(k => delete markerMap[k]);
+
+    items.forEach(n => {
+      const marker = new AMap.Marker({
+        position: [n.lng, n.lat],
+        content: makeMarkerContent(n.country),
+        anchor: 'center',
+        zIndex: 100,
+        extData: { id: n.id }
+      });
+      marker.on('click', () => focusNews(n.id));
+      marker.on('mouseover', () => {
+        marker.getContentDom().firstElementChild.style.transform = 'scale(1.3)';
+      });
+      marker.on('mouseout', () => {
+        const dom = marker.getContentDom();
+        if (dom && dom.firstElementChild) dom.firstElementChild.style.transform = 'scale(1)';
+      });
+      markerMap[n.id] = marker;
+      map.add(marker);
+    });
+  }
+
+  function focusNews(id) {
+    activeId = id;
+    const news = MOCK_NEWS.find(n => n.id === id);
+    if (!news) return;
+    map.setZoomAndCenter(7, [news.lng, news.lat], false, 400);
+    infoWindow.setContent(makeInfoCard(news));
+    infoWindow.open(map, [news.lng, news.lat]);
+    document.querySelectorAll('.news-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.id === id);
+    });
+    const activeEl = document.querySelector(`.news-item[data-id="${id}"]`);
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function applyFilter() {
+    const items = currentFilter === 'ALL'
+      ? MOCK_NEWS
+      : MOCK_NEWS.filter(n => n.country === currentFilter);
+    renderList(items);
+    renderMarkers(items);
+  }
+
+  // ====== 初始化 ======
+  function initMap() {
+    map = new AMap.Map('map', {
+      center: [68, 43],
+      zoom: 5,
+      mapStyle: 'amap://styles/dark',
+      viewMode: '2D',
+      features: ['bg', 'road', 'building', 'point']
+    });
+    infoWindow = new AMap.InfoWindow({
+      isCustom: true,
+      offset: new AMap.Pixel(0, -16),
+      autoMove: true
+    });
+    map.on('click', () => infoWindow.close());
+  }
+
+  function init() {
+    if (typeof AMap === 'undefined') {
+      document.getElementById('loadingOverlay').innerHTML = `
+        <div style="color: var(--text-secondary); text-align: center;">
+          <div style="font-size: 32px; margin-bottom: 12px;">🗺</div>
+          <div>地图加载失败</div>
+          <div style="font-size: 12px; margin-top: 8px;">请在脚本中替换 YOUR_AMAP_KEY 为有效的高德 API Key</div>
+        </div>`;
+      return;
+    }
+    initMap();
+    setTimeout(() => {
+      applyFilter();
+      document.getElementById('loadingOverlay').classList.add('hidden');
+    }, 600);
+  }
+
+  // ====== 事件绑定 ======
+  document.getElementById('countryFilter').addEventListener('click', e => {
+    const chip = e.target.closest('.country-chip');
+    if (!chip) return;
+    document.querySelectorAll('.country-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    currentFilter = chip.dataset.country;
+    activeId = null;
+    infoWindow && infoWindow.close();
+    applyFilter();
+  });
+
+  document.getElementById('aboutBtn').addEventListener('click', () => {
+    document.getElementById('aboutModal').classList.add('show');
+  });
+  document.getElementById('aboutClose').addEventListener('click', () => {
+    document.getElementById('aboutModal').classList.remove('show');
+  });
+  document.getElementById('aboutModal').addEventListener('click', e => {
+    if (e.target.id === 'aboutModal') {
+      document.getElementById('aboutModal').classList.remove('show');
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document.getElementById('aboutModal').classList.remove('show');
+      infoWindow && infoWindow.close();
+    }
+  });
+
+  // 启动
+  window.addEventListener('load', init);
+</script>
+
+</body>
+</html>

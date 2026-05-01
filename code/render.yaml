@@ -1,0 +1,39 @@
+# Render Blueprint
+# 一次性创建所有需要的服务
+# 部署方式：把仓库连到 Render，Render 会读这个文件自动创建服务
+
+services:
+  # 后端 API 服务（FastAPI + SQLite）
+  - type: web
+    name: news-map-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false        # 部署后在 Render 控制台手动填
+      - key: USE_MOCK
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+    autoDeploy: true       # 推送到 main 分支自动部署
+
+  # 前端静态站点
+  - type: web
+    name: news-map-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: bash build.sh
+    staticPublishPath: ./dist
+    envVars:
+      - key: AMAP_KEY
+        sync: false        # 部署后填
+      - key: API_BASE
+        sync: false        # 部署后填后端服务的 URL
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: "public, max-age=300"
+    autoDeploy: true
