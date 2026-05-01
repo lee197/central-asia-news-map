@@ -12,8 +12,10 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: ANTHROPIC_API_KEY
+      - key: GEMINI_API_KEY
         sync: false        # 部署后在 Render 控制台手动填
+      - key: GEMINI_MODEL
+        value: "gemini-2.0-flash"
       - key: USE_MOCK
         value: "false"
       - key: PYTHON_VERSION

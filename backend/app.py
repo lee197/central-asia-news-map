@@ -1,6 +1,6 @@
 """
 中亚新闻地图 - 后端服务
-功能：定时抓取 GDELT + RSS 新闻，调用 Claude 翻译并抽取地点，提供 API
+功能：定时抓取 GDELT + RSS 新闻，调用 Gemini 翻译并抽取地点，提供 API
 """
 import os
 import json
@@ -13,7 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import feedparser
-from anthropic import Anthropic
+from google import genai
+from google.genai import types as genai_types
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,14 +24,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("DB_PATH", "./news.db")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 USE_MOCK = os.environ.get("USE_MOCK", "false").lower() == "true"
 
-if not ANTHROPIC_API_KEY and not USE_MOCK:
-    log.warning("ANTHROPIC_API_KEY 未设置，将以 USE_MOCK 模式启动")
+if not GEMINI_API_KEY and not USE_MOCK:
+    log.warning("GEMINI_API_KEY 未设置，将以 USE_MOCK 模式启动")
     USE_MOCK = True
 
-claude = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 RSS_FEEDS = [
     {"url": "https://tengrinews.kz/rss/", "country": "KZ", "source": "Tengrinews"},
@@ -278,7 +280,7 @@ def already_have(url: str) -> bool:
 
 
 def llm_process(item: dict):
-    """调用 Claude：翻译 + 抽地点。USE_MOCK 模式直接返回内置结果。"""
+    """调用 Gemini：翻译 + 抽地点。USE_MOCK 模式直接返回内置结果。"""
     if USE_MOCK:
         return item.get("_mock_result")
 
@@ -305,12 +307,16 @@ def llm_process(item: dict):
   "lang_orig": "原文语种代码 ru/en/uz/kk 等"
 }}"""
     try:
-        msg = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}]
+        resp = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+                max_output_tokens=800,
+            ),
         )
-        text = msg.content[0].text.strip()
+        text = (resp.text or "").strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
