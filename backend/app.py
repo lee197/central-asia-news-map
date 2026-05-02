@@ -313,16 +313,31 @@ def llm_process(item: dict):
   "confidence": 0.85,
   "lang_orig": "原文语种代码 ru/en/uz/kk 等"
 }}"""
+    # 不同版本的 google-genai SDK 对 ThinkingConfig 字段命名不同，
+    # 这里做容错：能关就关 thinking，关不了就靠大 max_output_tokens 兜底。
+    config_kwargs = {
+        "response_mime_type": "application/json",
+        "temperature": 0.2,
+        "max_output_tokens": 4096,
+    }
+    for thinking_kwargs in (
+        {"thinking_budget": 0},
+        {"thinking_level": "off"},
+        {"include_thoughts": False},
+    ):
+        try:
+            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(**thinking_kwargs)
+            break
+        except Exception:
+            continue
+    else:
+        config_kwargs.pop("thinking_config", None)
+
     try:
         resp = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.2,
-                max_output_tokens=2048,
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-            ),
+            config=genai_types.GenerateContentConfig(**config_kwargs),
         )
         text = (resp.text or "").strip()
         if not text:
