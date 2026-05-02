@@ -1,6 +1,6 @@
 """
 中亚新闻地图 - 后端服务
-功能：定时抓取 GDELT + RSS 新闻，调用 Gemini 翻译并抽取地点，提供 API
+功能：定时抓取 GDELT + RSS 新闻，调用 Groq (Llama) 翻译并抽取地点，提供 API
 """
 import os
 import json
@@ -13,8 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import feedparser
-from google import genai
-from google.genai import types as genai_types
+from openai import OpenAI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,15 +23,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("DB_PATH", "./news.db")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 USE_MOCK = os.environ.get("USE_MOCK", "false").lower() == "true"
 
-if not GEMINI_API_KEY and not USE_MOCK:
-    log.warning("GEMINI_API_KEY 未设置，将以 USE_MOCK 模式启动")
+if not GROQ_API_KEY and not USE_MOCK:
+    log.warning("GROQ_API_KEY 未设置，将以 USE_MOCK 模式启动")
     USE_MOCK = True
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+llm_client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL) if GROQ_API_KEY else None
 
 RSS_FEEDS = [
     {"url": "https://tengrinews.kz/rss/", "country": "KZ", "source": "Tengrinews"},
@@ -45,9 +45,9 @@ RSS_FEEDS = [
 ]
 
 # 每次抓取最多调用 LLM 处理多少条（避免免费额度耗尽）
-MAX_LLM_PER_RUN = int(os.environ.get("MAX_LLM_PER_RUN", "20"))
-# 每次 LLM 调用之间的间隔秒数（Gemini 免费版每分钟限制 15 次）
-LLM_DELAY_SEC = float(os.environ.get("LLM_DELAY_SEC", "4.5"))
+MAX_LLM_PER_RUN = int(os.environ.get("MAX_LLM_PER_RUN", "30"))
+# 每次 LLM 调用之间的间隔秒数（Groq 免费版 30 RPM，留一点余量）
+LLM_DELAY_SEC = float(os.environ.get("LLM_DELAY_SEC", "2.5"))
 
 CENTRAL_ASIA_BOUNDS = {"lat_min": 35, "lat_max": 56, "lng_min": 46, "lng_max": 87}
 
@@ -287,61 +287,52 @@ def already_have(url: str) -> bool:
 
 
 def llm_process(item: dict):
-    """调用 Gemini：翻译 + 抽地点。USE_MOCK 模式直接返回内置结果。"""
+    """调用 Groq (Llama)：翻译 + 抽地点。USE_MOCK 模式直接返回内置结果。"""
     if USE_MOCK:
         return item.get("_mock_result")
 
-    prompt = f"""你是新闻分析助手。给定一条新闻的原文标题和摘要，请：
-1. 把标题和摘要翻译成简洁的中文
-2. 识别新闻"主要发生地"的城市和国家（必须是中亚五国：哈萨克斯坦KZ/乌兹别克斯坦UZ/吉尔吉斯斯坦KG/塔吉克斯坦TJ/土库曼斯坦TM）
-3. 给出该城市的经纬度（标准 WGS84）
-4. 评估你的判断置信度 0-1
-
-新闻原文：
+    system_prompt = (
+        "你是新闻分析助手，专门处理中亚五国（哈萨克斯坦KZ/乌兹别克斯坦UZ/"
+        "吉尔吉斯斯坦KG/塔吉克斯坦TJ/土库曼斯坦TM）的新闻。"
+        "你必须只输出严格合法的 JSON，不要 markdown 代码块、不要解释。"
+    )
+    user_prompt = f"""请处理这条新闻：
 标题：{item['title']}
 摘要：{item['summary']}
 来源国提示：{item.get('country_hint') or '未知'}
 
-只返回 JSON，不要其他文字：
-{{
-  "title_zh": "中文标题",
-  "summary_zh": "中文摘要 100-200 字",
-  "country": "KZ/UZ/KG/TJ/TM 之一，如果不属于中亚返回 null",
-  "city": "城市中文名",
-  "lat": 41.31,
-  "lng": 69.24,
-  "confidence": 0.85,
-  "lang_orig": "原文语种代码 ru/en/uz/kk 等"
-}}"""
-    # 不同版本的 google-genai SDK 对 ThinkingConfig 字段命名不同，
-    # 这里做容错：能关就关 thinking，关不了就靠大 max_output_tokens 兜底。
-    config_kwargs = {
-        "response_mime_type": "application/json",
-        "temperature": 0.2,
-        "max_output_tokens": 4096,
-    }
-    for thinking_kwargs in (
-        {"thinking_budget": 0},
-        {"thinking_level": "off"},
-        {"include_thoughts": False},
-    ):
-        try:
-            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(**thinking_kwargs)
-            break
-        except Exception:
-            continue
-    else:
-        config_kwargs.pop("thinking_config", None)
+要求：
+1. 把标题和摘要翻译成简洁的中文
+2. 识别新闻"主要发生地"的城市和国家（限定中亚五国 KZ/UZ/KG/TJ/TM）
+3. 给出该城市的经纬度（WGS84）
+4. 评估判断置信度 0-1
+
+输出 JSON 字段：
+- title_zh: 中文标题
+- summary_zh: 中文摘要 100-200 字
+- country: KZ/UZ/KG/TJ/TM 之一；不属于中亚返回 null
+- city: 城市中文名
+- lat: 纬度（数字）
+- lng: 经度（数字）
+- confidence: 0-1 之间的小数
+- lang_orig: 原文语种代码（ru/en/uz/kk 等）
+
+只输出 JSON。"""
 
     try:
-        resp = gemini_client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(**config_kwargs),
+        resp = llm_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=600,
+            response_format={"type": "json_object"},
         )
-        text = (resp.text or "").strip()
+        text = (resp.choices[0].message.content or "").strip()
         if not text:
-            log.error(f"LLM 返回空文本: finish={resp.candidates[0].finish_reason if resp.candidates else 'N/A'}")
+            log.error("LLM 返回空文本")
             return None
         if text.startswith("```"):
             text = text.split("```")[1]

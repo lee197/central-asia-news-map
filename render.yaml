@@ -7,19 +7,25 @@ services:
   - type: web
     name: news-map-api
     runtime: python
-    plan: free
+    plan: starter
     rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: GEMINI_API_KEY
+      - key: GROQ_API_KEY
         sync: false        # 部署后在 Render 控制台手动填
-      - key: GEMINI_MODEL
-        value: "gemini-2.5-flash"
+      - key: GROQ_MODEL
+        value: "llama-3.3-70b-versatile"
       - key: USE_MOCK
         value: "false"
+      - key: DB_PATH
+        value: "/data/news.db"
       - key: PYTHON_VERSION
         value: "3.11.9"
+    disk:
+      name: news-data
+      mountPath: /data
+      sizeGB: 1
     autoDeploy: true       # 推送到 main 分支自动部署
 
   # 前端静态站点
