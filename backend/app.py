@@ -36,11 +36,18 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 RSS_FEEDS = [
     {"url": "https://tengrinews.kz/rss/", "country": "KZ", "source": "Tengrinews"},
+    {"url": "https://www.kursiv.media/feed/", "country": "KZ", "source": "Kursiv"},
     {"url": "https://www.gazeta.uz/ru/rss/", "country": "UZ", "source": "Gazeta.uz"},
+    {"url": "https://kun.uz/ru/rss", "country": "UZ", "source": "Kun.uz"},
     {"url": "https://24.kg/rss/", "country": "KG", "source": "24.kg"},
-    {"url": "https://asiaplustj.info/ru/rss.xml", "country": "TJ", "source": "Asia-Plus"},
-    {"url": "https://eurasianet.org/rss.xml", "country": None, "source": "Eurasianet"},
+    {"url": "https://kaktus.media/rss", "country": "KG", "source": "Kaktus.media"},
+    {"url": "https://asiaplus.news/ru/feed/", "country": "TJ", "source": "Asia-Plus"},
 ]
+
+# 每次抓取最多调用 LLM 处理多少条（避免免费额度耗尽）
+MAX_LLM_PER_RUN = int(os.environ.get("MAX_LLM_PER_RUN", "20"))
+# 每次 LLM 调用之间的间隔秒数（Gemini 免费版每分钟限制 15 次）
+LLM_DELAY_SEC = float(os.environ.get("LLM_DELAY_SEC", "4.5"))
 
 CENTRAL_ASIA_BOUNDS = {"lat_min": 35, "lat_max": 56, "lng_min": 46, "lng_max": 87}
 
@@ -313,15 +320,23 @@ def llm_process(item: dict):
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
                 temperature=0.2,
-                max_output_tokens=800,
+                max_output_tokens=2048,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         text = (resp.text or "").strip()
+        if not text:
+            log.error(f"LLM 返回空文本: finish={resp.candidates[0].finish_reason if resp.candidates else 'N/A'}")
+            return None
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        data = json.loads(text.strip())
+        try:
+            data = json.loads(text.strip())
+        except json.JSONDecodeError as je:
+            log.error(f"LLM JSON 解析失败: {je}; 原文前 200 字: {text[:200]!r}")
+            return None
         if not data.get("country") or data["country"] not in ["KZ", "UZ", "KG", "TJ", "TM"]:
             return None
         if data.get("confidence", 0) < 0.5:
@@ -376,26 +391,46 @@ async def run_ingest():
             all_items.extend(await fetch_rss(feed))
         all_items.extend(await fetch_gdelt())
 
+    log.info(f"原始抓取 {len(all_items)} 条")
+
     seen_urls = set()
     new_items = []
+    skipped_existing = 0
     for it in all_items:
-        if not it["url"] or it["url"] in seen_urls or already_have(it["url"]):
+        if not it["url"] or it["url"] in seen_urls:
+            continue
+        if already_have(it["url"]):
+            skipped_existing += 1
+            seen_urls.add(it["url"])
             continue
         seen_urls.add(it["url"])
         new_items.append(it)
 
-    log.info(f"去重后 {len(new_items)} 条新条目")
+    log.info(f"去重后 {len(new_items)} 条新条目（{skipped_existing} 条已存在）")
+
+    if USE_MOCK:
+        limit = len(new_items)
+    else:
+        limit = MAX_LLM_PER_RUN
+    items_to_process = new_items[:limit]
+    if len(new_items) > limit:
+        log.info(f"本轮只处理前 {limit} 条（避免 LLM 限额）")
 
     processed = 0
-    for it in new_items[:50]:
+    rejected = 0
+    for idx, it in enumerate(items_to_process, 1):
         result = llm_process(it)
         if result:
             save_news(it, result)
             processed += 1
-        if not USE_MOCK:
-            await asyncio.sleep(0.3)
+            log.info(f"[{idx}/{len(items_to_process)}] ✓ 入库: {result['city']} - {result['title_zh'][:40]}")
+        else:
+            rejected += 1
+            log.info(f"[{idx}/{len(items_to_process)}] ✗ 丢弃: {it['title'][:60]}")
+        if not USE_MOCK and idx < len(items_to_process):
+            await asyncio.sleep(LLM_DELAY_SEC)
 
-    log.info(f"=== 抓取完成，新增 {processed} 条 ===")
+    log.info(f"=== 抓取完成：新增 {processed} 条，丢弃 {rejected} 条 ===")
     return processed
 
 
