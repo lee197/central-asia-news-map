@@ -440,6 +440,22 @@ def llm_process(item: dict):
             # 坐标不在中亚时，城市名也用首都（原来的城市可能是事件发生地，比如"北京"）
             data["city"] = cap["city"]
             log.info(f"  地点兜底 → {country} 首都 {cap['city']}")
+        # 城市名合法性兜底：Llama 偶尔翻译出"中市"/"中尺市"/"该市"等错乱中文。
+        # 真实中亚城市名都至少 3 字（塔什干/阿斯塔纳/比什凯克），
+        # 且不会出现"中"开头当作城市名的情况。
+        city = (data.get("city") or "").strip()
+        BAD_CITY_PATTERNS = ("中市", "中尺市", "该市", "城市", "首都", "市", "city", "City")
+        is_bad_city = (
+            len(city) < 2
+            or city in BAD_CITY_PATTERNS
+            or (city.endswith("市") and len(city) <= 3)  # "中市" "尺市" 等
+        )
+        if is_bad_city:
+            cap = COUNTRY_CAPITALS[country]
+            log.info(f"  城市名异常 [{city}] → 改为 {country} 首都 {cap['city']}")
+            data["city"] = cap["city"]
+            data["lat"] = cap["lat"]
+            data["lng"] = cap["lng"]
         return data
     except Exception as e:
         log.error(f"LLM 处理失败: {e}")
@@ -621,6 +637,34 @@ def get_news(
     conn.close()
     items = [dict(row) for row in rows]
     return {"count": len(items), "items": items}
+
+
+@app.post("/api/admin/fix-cities")
+def fix_cities():
+    """修正已入库的乱翻译城市名（"中市"/"中尺市" 等 → 首都）。"""
+    BAD_PATTERNS = ("中市", "中尺市", "该市", "城市", "首都", "市", "city", "City")
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT id, country, city FROM news").fetchall()
+    fixed = []
+    for row_id, country, city in rows:
+        city_clean = (city or "").strip()
+        if country not in COUNTRY_CAPITALS:
+            continue
+        is_bad = (
+            len(city_clean) < 2
+            or city_clean in BAD_PATTERNS
+            or (city_clean.endswith("市") and len(city_clean) <= 3)
+        )
+        if is_bad:
+            cap = COUNTRY_CAPITALS[country]
+            conn.execute(
+                "UPDATE news SET city = ?, lat = ?, lng = ? WHERE id = ?",
+                (cap["city"], cap["lat"], cap["lng"], row_id),
+            )
+            fixed.append({"id": row_id, "old_city": city, "new_city": cap["city"]})
+    conn.commit()
+    conn.close()
+    return {"fixed_count": len(fixed), "items": fixed}
 
 
 @app.get("/api/health")
