@@ -608,3 +608,26 @@ async def refresh():
         return {"status": "ok", "added": added}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/probe")
+async def debug_probe():
+    """探测所有 RSS 源在云端的可达性 + 拿到多少条 + 关键词命中。"""
+    results = []
+    for feed in RSS_FEEDS:
+        items = await fetch_rss(feed)
+        ca_hits = sum(1 for it in items if looks_central_asian(it))
+        sample = items[0]["title"][:80] if items else None
+        results.append({
+            "source": feed["source"],
+            "perspective": feed["perspective"],
+            "url": feed["url"],
+            "items_fetched": len(items),
+            "central_asia_hits": ca_hits,
+            "sample_title": sample,
+        })
+    by_persp = {}
+    for r in results:
+        by_persp.setdefault(r["perspective"], 0)
+        by_persp[r["perspective"]] += r["items_fetched"]
+    return {"by_perspective_total": by_persp, "details": results}

@@ -15,7 +15,7 @@ services:
       - key: GROQ_API_KEY
         sync: false        # 部署后在 Render 控制台手动填
       - key: GROQ_MODEL
-        value: "llama-3.3-70b-versatile"
+        value: "llama-3.1-8b-instant"
       - key: USE_MOCK
         value: "false"
       - key: DB_PATH
