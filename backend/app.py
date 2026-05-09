@@ -35,13 +35,20 @@ if not GROQ_API_KEY and not USE_MOCK:
 llm_client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL) if GROQ_API_KEY else None
 
 RSS_FEEDS = [
-    {"url": "https://tengrinews.kz/rss/", "country": "KZ", "source": "Tengrinews"},
-    {"url": "https://www.kursiv.media/feed/", "country": "KZ", "source": "Kursiv"},
-    {"url": "https://www.gazeta.uz/ru/rss/", "country": "UZ", "source": "Gazeta.uz"},
-    {"url": "https://kun.uz/ru/rss", "country": "UZ", "source": "Kun.uz"},
-    {"url": "https://24.kg/rss/", "country": "KG", "source": "24.kg"},
-    {"url": "https://kaktus.media/rss", "country": "KG", "source": "Kaktus.media"},
-    {"url": "https://asiaplus.news/ru/feed/", "country": "TJ", "source": "Asia-Plus"},
+    # === 当地视角（local）===
+    {"url": "https://tengrinews.kz/rss/", "country": "KZ", "source": "Tengrinews", "perspective": "local"},
+    {"url": "https://www.kursiv.media/feed/", "country": "KZ", "source": "Kursiv", "perspective": "local"},
+    {"url": "https://www.gazeta.uz/ru/rss/", "country": "UZ", "source": "Gazeta.uz", "perspective": "local"},
+    {"url": "https://kun.uz/ru/rss", "country": "UZ", "source": "Kun.uz", "perspective": "local"},
+    {"url": "https://24.kg/rss/", "country": "KG", "source": "24.kg", "perspective": "local"},
+    {"url": "https://kaktus.media/rss", "country": "KG", "source": "Kaktus.media", "perspective": "local"},
+    {"url": "https://asiaplus.news/ru/feed/", "country": "TJ", "source": "Asia-Plus", "perspective": "local"},
+
+    # === 欧美视角（western）—— 英文媒体的中亚或综合频道，关键词预筛过滤 ===
+    {"url": "https://eurasianet.org/rss", "country": None, "source": "Eurasianet", "perspective": "western"},
+    {"url": "https://thediplomat.com/regions/central-asia/feed/", "country": None, "source": "The Diplomat", "perspective": "western"},
+    {"url": "https://timesca.com/feed/", "country": None, "source": "Times of Central Asia", "perspective": "western"},
+    {"url": "https://www.intellinews.com/feed/", "country": None, "source": "bne IntelliNews", "perspective": "western"},
 ]
 
 # 每次抓取最多调用 LLM 处理多少条（避免免费额度耗尽）
@@ -50,6 +57,28 @@ MAX_LLM_PER_RUN = int(os.environ.get("MAX_LLM_PER_RUN", "30"))
 LLM_DELAY_SEC = float(os.environ.get("LLM_DELAY_SEC", "2.5"))
 
 CENTRAL_ASIA_BOUNDS = {"lat_min": 35, "lat_max": 56, "lng_min": 46, "lng_max": 87}
+
+# 关键词预筛选：欧美/综合源命中任一关键词才进 LLM，避免浪费配额
+CENTRAL_ASIA_KEYWORDS = [
+    # 国家英文名（小写匹配）
+    "kazakhstan", "uzbekistan", "kyrgyzstan", "tajikistan", "turkmenistan",
+    "kazakh", "uzbek", "kyrgyz", "tajik", "turkmen",
+    # 俄语/本地名
+    "казахстан", "узбекистан", "кыргызстан", "таджикистан", "туркменистан",
+    # 主要城市
+    "astana", "almaty", "tashkent", "samarkand", "bukhara", "shymkent",
+    "bishkek", "osh", "dushanbe", "khujand", "ashgabat", "nur-sultan",
+    # 区域词
+    "central asia", "центральная азия", "中亚",
+    # 现任领导人姓
+    "tokayev", "mirziyoyev", "japarov", "rahmon", "berdimuhamedov", "berdymukhamedov",
+]
+
+
+def looks_central_asian(item: dict) -> bool:
+    """关键词预筛：item 标题/摘要里是否提到中亚相关词。"""
+    text = ((item.get("title") or "") + " " + (item.get("summary") or "")).lower()
+    return any(kw in text for kw in CENTRAL_ASIA_KEYWORDS)
 
 MOCK_NEWS = [
     {
@@ -154,8 +183,9 @@ MOCK_NEWS = [
         "url": "https://example.com/mock8",
         "title": "SCO foreign ministers meet in Astana",
         "summary": "Astana hosts SCO foreign ministers discussing regional security and economic cooperation.",
-        "source": "MockSource",
+        "source": "Eurasianet (mock)",
         "country_hint": "KZ",
+        "perspective": "western",
         "published": "2026-04-29T15:00:00Z",
         "_mock_result": {
             "title_zh": "阿斯塔纳举办上合组织外长会议",
@@ -168,8 +198,9 @@ MOCK_NEWS = [
         "url": "https://example.com/mock9",
         "title": "New Osh-Kashgar trade corridor opens",
         "summary": "Osh — A new logistics corridor connecting Osh in southern Kyrgyzstan to Kashgar, China has been launched.",
-        "source": "MockSource",
+        "source": "The Diplomat (mock)",
         "country_hint": "KG",
+        "perspective": "western",
         "published": "2026-04-29T12:00:00Z",
         "_mock_result": {
             "title_zh": "吉尔吉斯斯坦南部奥什州开通新跨境物流通道",
@@ -182,8 +213,9 @@ MOCK_NEWS = [
         "url": "https://example.com/mock10",
         "title": "Tashkent metro new line opens",
         "summary": "Tashkent — A 19-kilometer new metro line with 11 stations has officially opened.",
-        "source": "MockSource",
+        "source": "RFE/RL (mock)",
         "country_hint": "UZ",
+        "perspective": "western",
         "published": "2026-04-29T10:00:00Z",
         "_mock_result": {
             "title_zh": "塔什干地铁新线路正式通车",
@@ -213,11 +245,19 @@ def init_db():
             published_at TEXT,
             fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             confidence REAL,
-            lang_orig TEXT
+            lang_orig TEXT,
+            perspective TEXT DEFAULT 'local'
         )
     """)
+    # 旧库迁移：如果 perspective 列不存在则加上
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(news)").fetchall()}
+    if "perspective" not in cols:
+        conn.execute("ALTER TABLE news ADD COLUMN perspective TEXT DEFAULT 'local'")
+        conn.execute("UPDATE news SET perspective = 'local' WHERE perspective IS NULL")
+        log.info("数据库迁移：已添加 perspective 列")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_published ON news(published_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_country ON news(country)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_perspective ON news(perspective)")
     conn.commit()
     conn.close()
     log.info(f"数据库初始化完成: {DB_PATH}")
@@ -227,13 +267,23 @@ def url_to_id(url: str) -> str:
     return hashlib.sha1(url.encode()).hexdigest()[:12]
 
 
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
 async def fetch_rss(feed_info: dict) -> list:
     items = []
+    perspective = feed_info.get("perspective", "local")
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             resp = await client.get(
                 feed_info["url"],
-                headers={"User-Agent": "Mozilla/5.0 (compatible; CentralAsiaNewsMap/1.0)"}
+                headers={
+                    "User-Agent": BROWSER_UA,
+                    "Accept": "application/rss+xml, application/xml, text/xml, */*",
+                },
             )
             parsed = feedparser.parse(resp.text)
             for entry in parsed.entries[:30]:
@@ -243,9 +293,10 @@ async def fetch_rss(feed_info: dict) -> list:
                     "summary": (entry.get("summary", "") or "")[:1500],
                     "source": feed_info["source"],
                     "country_hint": feed_info["country"],
+                    "perspective": perspective,
                     "published": entry.get("published", "") or entry.get("updated", "")
                 })
-        log.info(f"RSS {feed_info['source']}: 拿到 {len(items)} 条")
+        log.info(f"RSS [{perspective}] {feed_info['source']}: 拿到 {len(items)} 条")
     except Exception as e:
         log.error(f"RSS {feed_info['source']} 失败: {e}")
     return items
@@ -271,6 +322,7 @@ async def fetch_gdelt() -> list:
                         "summary": art.get("title", ""),
                         "source": art.get("domain", "GDELT"),
                         "country_hint": cc,
+                        "perspective": "local",
                         "published": art.get("seendate", "")
                     })
             log.info(f"GDELT {cc}: 拿到数据")
@@ -363,8 +415,8 @@ def save_news(item: dict, llm_result: dict):
             INSERT OR IGNORE INTO news
             (id, source_url, source_name, country, city, lat, lng,
              title_orig, title_zh, summary_orig, summary_zh,
-             published_at, confidence, lang_orig)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             published_at, confidence, lang_orig, perspective)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             url_to_id(item["url"]),
             item["url"],
@@ -379,7 +431,8 @@ def save_news(item: dict, llm_result: dict):
             llm_result["summary_zh"],
             item["published"],
             llm_result["confidence"],
-            llm_result.get("lang_orig", "")
+            llm_result.get("lang_orig", ""),
+            item.get("perspective", "local"),
         ))
         conn.commit()
     finally:
@@ -414,6 +467,23 @@ async def run_ingest():
 
     log.info(f"去重后 {len(new_items)} 条新条目（{skipped_existing} 条已存在）")
 
+    # 关键词预筛：欧美/无国家提示的源走预筛，本地源直接信任
+    if not USE_MOCK:
+        before = len(new_items)
+        filtered = []
+        keyword_skipped = 0
+        for it in new_items:
+            # local + 有 country_hint 的源信任，直接进 LLM
+            if it.get("perspective") == "local" and it.get("country_hint"):
+                filtered.append(it)
+            elif looks_central_asian(it):
+                filtered.append(it)
+            else:
+                keyword_skipped += 1
+        new_items = filtered
+        if keyword_skipped:
+            log.info(f"关键词预筛：放行 {len(new_items)} 条，丢弃 {keyword_skipped} 条无关条目")
+
     if USE_MOCK:
         limit = len(new_items)
     else:
@@ -429,7 +499,8 @@ async def run_ingest():
         if result:
             save_news(it, result)
             processed += 1
-            log.info(f"[{idx}/{len(items_to_process)}] ✓ 入库: {result['city']} - {result['title_zh'][:40]}")
+            persp = it.get("perspective", "local")
+            log.info(f"[{idx}/{len(items_to_process)}] ✓ 入库[{persp}]: {result['city']} - {result['title_zh'][:40]}")
         else:
             rejected += 1
             log.info(f"[{idx}/{len(items_to_process)}] ✗ 丢弃: {it['title'][:60]}")
@@ -481,7 +552,12 @@ def root():
 
 
 @app.get("/api/news")
-def get_news(days: int = 7, country: str | None = None, limit: int = 500):
+def get_news(
+    days: int = 7,
+    country: str | None = None,
+    perspective: str | None = None,
+    limit: int = 500,
+):
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -490,6 +566,9 @@ def get_news(days: int = 7, country: str | None = None, limit: int = 500):
     if country and country != "ALL":
         sql += " AND country = ?"
         params.append(country)
+    if perspective and perspective != "ALL":
+        sql += " AND perspective = ?"
+        params.append(perspective)
     sql += " ORDER BY published_at DESC LIMIT ?"
     params.append(limit)
     rows = conn.execute(sql, params).fetchall()

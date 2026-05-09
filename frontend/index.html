@@ -179,6 +179,23 @@
   .country-badge.kg { background: rgba(239,107,107,0.15); color: var(--color-kg); }
   .country-badge.tj { background: rgba(167,139,250,0.15); color: var(--color-tj); }
   .country-badge.tm { background: rgba(74,222,128,0.15); color: var(--color-tm); }
+  .perspective-badge {
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 500;
+    font-size: 11px;
+    border: 1px solid transparent;
+  }
+  .perspective-badge.local {
+    background: rgba(139,153,173,0.12);
+    color: var(--text-secondary);
+    border-color: rgba(139,153,173,0.25);
+  }
+  .perspective-badge.western {
+    background: rgba(232,238,245,0.08);
+    color: var(--text-primary);
+    border-color: rgba(232,238,245,0.4);
+  }
   .news-item-time {
     color: var(--text-tertiary);
   }
@@ -382,6 +399,11 @@
   <div class="logo"><span class="logo-emoji">🌍</span>中亚新闻地图</div>
   <div class="update-info" id="updateInfo">🔄 更新于刚刚</div>
   <div class="topbar-right">
+    <div class="country-filter" id="perspectiveFilter">
+      <div class="country-chip active" data-perspective="ALL">全部视角</div>
+      <div class="country-chip" data-perspective="local">当地</div>
+      <div class="country-chip" data-perspective="western">欧美</div>
+    </div>
     <div class="country-filter" id="countryFilter">
       <div class="country-chip active" data-country="ALL">全部</div>
       <div class="country-chip" data-country="KZ">KZ</div>
@@ -474,7 +496,10 @@
   let map, infoWindow;
   const markerMap = {};   // id -> marker
   let currentFilter = 'ALL';
+  let currentPerspective = 'ALL';
   let activeId = null;
+
+  const PERSPECTIVE_LABEL = { local: '当地', western: '欧美' };
 
   // ====== 工具函数 ======
   function timeAgo(iso) {
@@ -485,8 +510,20 @@
     return Math.floor(diff / 86400) + ' 天前';
   }
 
-  function makeMarkerContent(country) {
+  function makeMarkerContent(country, perspective) {
     const color = COUNTRY_COLORS[country] || '#3B9EFF';
+    if (perspective === 'western') {
+      // 欧美视角：内圆 + 白色外环 + 同色光晕，跟当地视角明显区分
+      return `<div style="
+        width: 18px; height: 18px;
+        background: ${color};
+        border: 3px solid #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px ${color}80, 0 2px 6px rgba(0,0,0,0.6);
+        cursor: pointer;
+        transition: transform 0.15s;
+      "></div>`;
+    }
     return `<div style="
       width: 14px; height: 14px;
       background: ${color};
@@ -500,11 +537,14 @@
 
   function makeInfoCard(news) {
     const country = news.country.toLowerCase();
+    const persp = news.perspective || 'local';
+    const perspLabel = PERSPECTIVE_LABEL[persp] || persp;
     return `
       <div class="info-card">
         <div class="info-card-head">
           <div class="info-card-meta">
             <span class="country-badge ${country}">${news.country}</span>
+            <span class="perspective-badge ${persp}">${perspLabel}视角</span>
             <span>${timeAgo(news.published_at)}</span>
           </div>
         </div>
@@ -530,16 +570,21 @@
         </div>`;
       return;
     }
-    list.innerHTML = items.map(n => `
+    list.innerHTML = items.map(n => {
+      const persp = n.perspective || 'local';
+      const perspLabel = PERSPECTIVE_LABEL[persp] || persp;
+      return `
       <div class="news-item ${n.id === activeId ? 'active' : ''}" data-id="${n.id}">
         <div class="news-item-meta">
           <span class="country-badge ${n.country.toLowerCase()}">${n.country}</span>
+          <span class="perspective-badge ${persp}">${perspLabel}</span>
           <span class="news-item-time">${timeAgo(n.published_at)}</span>
         </div>
         <div class="news-item-title">${n.title_zh}</div>
         <div class="news-item-city">${n.city}</div>
       </div>
-    `).join('');
+      `;
+    }).join('');
     list.querySelectorAll('.news-item').forEach(el => {
       el.addEventListener('click', () => focusNews(el.dataset.id));
     });
@@ -552,9 +597,9 @@
     items.forEach(n => {
       const marker = new AMap.Marker({
         position: [n.lng, n.lat],
-        content: makeMarkerContent(n.country),
+        content: makeMarkerContent(n.country, n.perspective),
         anchor: 'center',
-        zIndex: 100,
+        zIndex: n.perspective === 'western' ? 110 : 100,
         extData: { id: n.id }
       });
       marker.on('click', () => focusNews(n.id));
@@ -585,9 +630,13 @@
   }
 
   function applyFilter() {
-    const items = currentFilter === 'ALL'
-      ? NEWS_DATA
-      : NEWS_DATA.filter(n => n.country === currentFilter);
+    let items = NEWS_DATA;
+    if (currentFilter !== 'ALL') {
+      items = items.filter(n => n.country === currentFilter);
+    }
+    if (currentPerspective !== 'ALL') {
+      items = items.filter(n => (n.perspective || 'local') === currentPerspective);
+    }
     renderList(items);
     renderMarkers(items);
   }
@@ -625,7 +674,8 @@
         summary_zh: n.summary_zh,
         source: n.source_name,
         source_url: n.source_url,
-        published_at: n.published_at
+        published_at: n.published_at,
+        perspective: n.perspective || 'local'
       }));
       const updateEl = document.getElementById('updateInfo');
       if (updateEl) updateEl.textContent = '🔄 共 ' + NEWS_DATA.length + ' 条新闻';
@@ -666,10 +716,21 @@
   // ====== 事件绑定 ======
   document.getElementById('countryFilter').addEventListener('click', e => {
     const chip = e.target.closest('.country-chip');
-    if (!chip) return;
-    document.querySelectorAll('.country-chip').forEach(c => c.classList.remove('active'));
+    if (!chip || !chip.dataset.country) return;
+    e.currentTarget.querySelectorAll('.country-chip').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
     currentFilter = chip.dataset.country;
+    activeId = null;
+    infoWindow && infoWindow.close();
+    applyFilter();
+  });
+
+  document.getElementById('perspectiveFilter').addEventListener('click', e => {
+    const chip = e.target.closest('.country-chip');
+    if (!chip || !chip.dataset.perspective) return;
+    e.currentTarget.querySelectorAll('.country-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    currentPerspective = chip.dataset.perspective;
     activeId = null;
     infoWindow && infoWindow.close();
     applyFilter();
