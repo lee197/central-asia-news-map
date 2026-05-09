@@ -52,7 +52,7 @@ RSS_FEEDS = [
 ]
 
 # 每次抓取最多调用 LLM 处理多少条（避免免费额度耗尽）
-MAX_LLM_PER_RUN = int(os.environ.get("MAX_LLM_PER_RUN", "30"))
+MAX_LLM_PER_RUN = int(os.environ.get("MAX_LLM_PER_RUN", "40"))
 # 每次 LLM 调用之间的间隔秒数（Groq 免费版 30 RPM，留一点余量）
 LLM_DELAY_SEC = float(os.environ.get("LLM_DELAY_SEC", "2.5"))
 
@@ -488,6 +488,15 @@ async def run_ingest():
         limit = len(new_items)
     else:
         limit = MAX_LLM_PER_RUN
+        # 均衡分配 LLM 名额：local 和 western 各占一半，避免本地源吃光配额
+        local_items = [it for it in new_items if it.get("perspective") == "local"]
+        western_items = [it for it in new_items if it.get("perspective") == "western"]
+        half = limit // 2
+        # 哪边不够就让另一边补满
+        local_quota = min(len(local_items), max(half, limit - len(western_items)))
+        western_quota = min(len(western_items), limit - local_quota)
+        new_items = local_items[:local_quota] + western_items[:western_quota]
+        log.info(f"配额分配：local {local_quota}/{len(local_items)}，western {western_quota}/{len(western_items)}")
     items_to_process = new_items[:limit]
     if len(new_items) > limit:
         log.info(f"本轮只处理前 {limit} 条（避免 LLM 限额）")
