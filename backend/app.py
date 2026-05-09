@@ -48,6 +48,7 @@ RSS_FEEDS = [
     {"url": "https://eurasianet.org/rss", "country": None, "source": "Eurasianet", "perspective": "western"},
     {"url": "https://thediplomat.com/regions/central-asia/feed/", "country": None, "source": "The Diplomat", "perspective": "western"},
     {"url": "https://timesca.com/feed/", "country": None, "source": "Times of Central Asia", "perspective": "western"},
+    {"url": "https://astanatimes.com/feed/", "country": "KZ", "source": "Astana Times", "perspective": "western"},
     {"url": "https://www.intellinews.com/feed/", "country": None, "source": "bne IntelliNews", "perspective": "western"},
 ]
 
