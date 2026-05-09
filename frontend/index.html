@@ -591,20 +591,9 @@
     });
   }
 
-  function makeClusterContent(count, items) {
-    // 用主导国家的颜色作为聚合圈的色系
-    const countryCount = {};
-    items.forEach(it => {
-      const c = it.extData && it.extData.news ? it.extData.news.country : null;
-      if (c) countryCount[c] = (countryCount[c] || 0) + 1;
-    });
-    let dominantCountry = 'KZ';
-    let max = 0;
-    for (const c in countryCount) {
-      if (countryCount[c] > max) { max = countryCount[c]; dominantCountry = c; }
-    }
+  function makeClusterContent(count, dominantCountry) {
     const color = COUNTRY_COLORS[dominantCountry] || '#3B9EFF';
-    const size = Math.min(48, 24 + Math.log2(count) * 6);
+    const size = Math.min(52, 26 + Math.log2(count) * 6);
     return `<div style="
       width: ${size}px; height: ${size}px;
       background: ${color}E0;
@@ -617,11 +606,12 @@
     ">${count}</div>`;
   }
 
-  function showClusterList(clusterItems, position) {
-    // 聚合点击：弹一个列表样的 InfoWindow，每条标题可点击
-    const newsList = clusterItems.map(m => {
-      const id = m.extData && m.extData.news ? m.extData.news.id : null;
-      return id ? NEWS_DATA.find(x => x.id === id) : null;
+  function showClusterList(clusterData, position) {
+    // clusterData 是 [{lnglat, weight, ...}] 数据点数组（v2.0 文档格式）
+    // 我们在原始 point 上塞了 newsId，所以这里反查 NEWS_DATA
+    const newsList = clusterData.map(d => {
+      const id = d.newsId != null ? d.newsId : (d.data && d.data.newsId);
+      return id != null ? NEWS_DATA.find(x => String(x.id) === String(id)) : null;
     }).filter(Boolean);
 
     const html = `
@@ -661,72 +651,106 @@
   }
 
   function renderMarkers(items) {
-    // 清掉旧 clusterer 和单 marker
+    // 清掉旧 clusterer
     if (clusterer) {
       clusterer.setMap(null);
       clusterer = null;
     }
+    // 清掉降级模式下直接 add 上去的 marker
     Object.values(markerMap).forEach(m => map.remove(m));
     Object.keys(markerMap).forEach(k => delete markerMap[k]);
 
     if (items.length === 0) return;
 
-    // 把每条新闻包装成独立 AMap.Marker（不直接 add 到 map，由 clusterer 管理）
-    const markers = items.map(n => {
+    // v2.0 文档格式：[{lnglat:[lng,lat], weight:1, ...自定义字段}]
+    const points = items.map(n => ({
+      lnglat: [n.lng, n.lat],
+      weight: 1,
+      newsId: n.id,
+      country: n.country,
+      perspective: n.perspective
+    }));
+
+    if (typeof AMap.MarkerCluster === 'function') {
+      try {
+        clusterer = new AMap.MarkerCluster(map, points, {
+          gridSize: 60,
+          maxZoom: 11,
+          // 单点渲染：用我们原来的 country 颜色 + perspective 区分
+          renderMarker: function(ctx) {
+            const data = ctx.data && ctx.data[0];
+            const country = data ? data.country : 'KZ';
+            const perspective = data ? data.perspective : 'local';
+            const newsId = data ? data.newsId : null;
+            ctx.marker.setContent(makeMarkerContent(country, perspective));
+            ctx.marker.setAnchor('center');
+            ctx.marker.setOffset(new AMap.Pixel(0, 0));
+            ctx.marker.setExtData({ newsId });
+          },
+          // 聚合点渲染：count + 主导国家颜色
+          renderClusterMarker: function(ctx) {
+            const countryCount = {};
+            (ctx.clusterData || []).forEach(d => {
+              if (d.country) countryCount[d.country] = (countryCount[d.country] || 0) + 1;
+            });
+            let dominant = 'KZ';
+            let mx = 0;
+            for (const c in countryCount) {
+              if (countryCount[c] > mx) { mx = countryCount[c]; dominant = c; }
+            }
+            ctx.marker.setContent(makeClusterContent(ctx.count, dominant));
+            ctx.marker.setAnchor('center');
+            ctx.marker.setOffset(new AMap.Pixel(0, 0));
+          }
+        });
+
+        // 单点点击：跳到详情
+        clusterer.on('click', (ev) => {
+          if (!ev.clusterData) return;
+          if (ev.clusterData.length === 1) {
+            const d = ev.clusterData[0];
+            if (d.newsId != null) focusNews(d.newsId);
+          } else if (ev.clusterData.length > 1) {
+            // 多条：弹出列表 InfoWindow
+            showClusterList(ev.clusterData, ev.lnglat);
+          }
+        });
+
+        console.log(`[cluster] 创建成功，${points.length} 个数据点进入聚合器`);
+      } catch (e) {
+        console.error('MarkerCluster 初始化失败，降级到单点:', e);
+        clusterer = null;
+        renderMarkersFallback(items);
+      }
+    } else {
+      console.warn('AMap.MarkerCluster 未加载，降级到单点');
+      renderMarkersFallback(items);
+    }
+  }
+
+  function renderMarkersFallback(items) {
+    items.forEach(n => {
       const marker = new AMap.Marker({
         position: [n.lng, n.lat],
         content: makeMarkerContent(n.country, n.perspective),
         anchor: 'center',
-        offset: new AMap.Pixel(0, 0),
-        extData: { news: n }
+        offset: new AMap.Pixel(0, 0)
       });
       marker.on('click', () => focusNews(n.id));
       markerMap[n.id] = marker;
-      return marker;
+      map.add(marker);
     });
-
-    // 用 MarkerCluster 聚合 markers；用默认样式（避免 renderClusterMarker 回调问题）
-    let clusterOk = false;
-    if (typeof AMap.MarkerCluster === 'function') {
-      try {
-        clusterer = new AMap.MarkerCluster(map, markers, {
-          gridSize: 60,
-          maxZoom: 11,
-          // 不传 renderClusterMarker，用 AMap 默认蓝色圈样式
-        });
-        clusterer.on('click', (ev) => {
-          if (ev.clusterData && ev.clusterData.length > 1) {
-            showClusterList(ev.clusterData, ev.lnglat);
-          } else if (ev.clusterData && ev.clusterData.length === 1) {
-            const m = ev.clusterData[0];
-            const news = m.getExtData ? m.getExtData().news : null;
-            if (news) focusNews(news.id);
-          }
-        });
-        clusterOk = true;
-        console.log(`[cluster] 创建成功，${markers.length} 个 markers 进入聚合器`);
-      } catch (e) {
-        console.error('MarkerCluster 初始化失败，降级到单点:', e);
-        clusterer = null;
-      }
-    } else {
-      console.warn('AMap.MarkerCluster 未加载，降级到单点');
-    }
-    if (!clusterOk) {
-      console.log(`[fallback] 降级，直接 add ${markers.length} 个单 marker`);
-      markers.forEach(m => map.add(m));
-    }
   }
 
   function focusNews(id) {
-    activeId = id;
-    const news = NEWS_DATA.find(n => n.id === id);
+    const news = NEWS_DATA.find(n => String(n.id) === String(id));
     if (!news) return;
+    activeId = news.id;
     map.setZoomAndCenter(7, [news.lng, news.lat], false, 400);
     infoWindow.setContent(makeInfoCard(news));
     infoWindow.open(map, [news.lng, news.lat]);
     document.querySelectorAll('.news-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.id === id);
+      el.classList.toggle('active', String(el.dataset.id) === String(news.id));
     });
     const activeEl = document.querySelector(`.news-item[data-id="${id}"]`);
     if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
