@@ -286,11 +286,13 @@ async def fetch_rss(feed_info: dict) -> list:
                 },
             )
             parsed = feedparser.parse(resp.text)
-            for entry in parsed.entries[:30]:
+            # 每源只取前 12 条（最新），节省 LLM 调用
+            for entry in parsed.entries[:12]:
                 items.append({
                     "url": entry.get("link", ""),
                     "title": entry.get("title", ""),
-                    "summary": (entry.get("summary", "") or "")[:1500],
+                    # 摘要截到 400 字，足够抽地点+翻译，token 消耗 ~减半
+                    "summary": (entry.get("summary", "") or "")[:400],
                     "source": feed_info["source"],
                     "country_hint": feed_info["country"],
                     "perspective": perspective,
@@ -488,15 +490,13 @@ async def run_ingest():
         limit = len(new_items)
     else:
         limit = MAX_LLM_PER_RUN
-        # 均衡分配 LLM 名额：local 和 western 各占一半，避免本地源吃光配额
+        # Western 优先：欧美源每天就 5-15 条，先全部处理完；剩余配额留给 local
         local_items = [it for it in new_items if it.get("perspective") == "local"]
         western_items = [it for it in new_items if it.get("perspective") == "western"]
-        half = limit // 2
-        # 哪边不够就让另一边补满
-        local_quota = min(len(local_items), max(half, limit - len(western_items)))
-        western_quota = min(len(western_items), limit - local_quota)
-        new_items = local_items[:local_quota] + western_items[:western_quota]
-        log.info(f"配额分配：local {local_quota}/{len(local_items)}，western {western_quota}/{len(western_items)}")
+        western_quota = min(len(western_items), limit)
+        local_quota = max(0, limit - western_quota)
+        new_items = western_items[:western_quota] + local_items[:local_quota]
+        log.info(f"配额分配（western 优先）：western {western_quota}/{len(western_items)}，local {local_quota}/{len(local_items)}")
     items_to_process = new_items[:limit]
     if len(new_items) > limit:
         log.info(f"本轮只处理前 {limit} 条（避免 LLM 限额）")
@@ -533,7 +533,8 @@ def cleanup_old():
 async def lifespan(app: FastAPI):
     init_db()
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(run_ingest, "interval", minutes=30, next_run_time=datetime.now())
+    # 抓取频率改为 2 小时一次，节省 LLM token（中亚新闻一天就几十条，没必要抓太勤）
+    scheduler.add_job(run_ingest, "interval", hours=2, next_run_time=datetime.now())
     scheduler.add_job(cleanup_old, "cron", hour=3)
     scheduler.start()
     log.info(f"调度器启动 (mock={USE_MOCK})")
