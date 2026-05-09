@@ -58,6 +58,15 @@ LLM_DELAY_SEC = float(os.environ.get("LLM_DELAY_SEC", "2.5"))
 
 CENTRAL_ASIA_BOUNDS = {"lat_min": 35, "lat_max": 56, "lng_min": 46, "lng_max": 87}
 
+# 各国首都的中文名 + 坐标（WGS84），地点解析失败时兜底
+COUNTRY_CAPITALS = {
+    "KZ": {"city": "阿斯塔纳", "lat": 51.1605, "lng": 71.4704},
+    "UZ": {"city": "塔什干",   "lat": 41.2995, "lng": 69.2401},
+    "KG": {"city": "比什凯克", "lat": 42.8746, "lng": 74.5698},
+    "TJ": {"city": "杜尚别",   "lat": 38.5598, "lng": 68.7870},
+    "TM": {"city": "阿什哈巴德","lat": 37.9601, "lng": 58.3261},
+}
+
 # 关键词预筛选：欧美/综合源命中任一关键词才进 LLM，避免浪费配额
 CENTRAL_ASIA_KEYWORDS = [
     # 国家英文名（小写匹配）
@@ -346,8 +355,8 @@ def llm_process(item: dict):
         return item.get("_mock_result")
 
     system_prompt = (
-        "你是新闻分析助手，专门处理中亚五国（哈萨克斯坦KZ/乌兹别克斯坦UZ/"
-        "吉尔吉斯斯坦KG/塔吉克斯坦TJ/土库曼斯坦TM）的新闻。"
+        "你是新闻分析助手，专门处理跟中亚五国（哈萨克斯坦KZ/乌兹别克斯坦UZ/"
+        "吉尔吉斯斯坦KG/塔吉克斯坦TJ/土库曼斯坦TM）相关的新闻。"
         "你必须只输出严格合法的 JSON，不要 markdown 代码块、不要解释。"
     )
     user_prompt = f"""请处理这条新闻：
@@ -355,17 +364,28 @@ def llm_process(item: dict):
 摘要：{item['summary']}
 来源国提示：{item.get('country_hint') or '未知'}
 
-要求：
-1. 把标题和摘要翻译成简洁的中文
-2. 识别新闻"主要发生地"的城市和国家（限定中亚五国 KZ/UZ/KG/TJ/TM）
-3. 给出该城市的经纬度（WGS84）
-4. 评估判断置信度 0-1
+判断标准（重要）：
+- 只要新闻"主要关于"中亚五国之一（不管事件物理发生在哪），就当作中亚新闻处理。
+  例如：「美国对哈萨克稀土的策略」、「中国与吉尔吉斯签贸易协定」、
+       「欧盟对塔吉克斯坦的援助」—— 都算中亚新闻。
+- 如果新闻只是顺带提一句中亚某国，主题完全是别国的事（例如俄乌战争、欧盟内政），
+  返回 country=null 拒绝入库。
+
+地点定位规则：
+- 如果有具体的中亚城市（塔什干、撒马尔罕、阿拉木图等），用该城市。
+- 如果新闻是关于某国但事件不在该国（例如外交协议在北京签的），
+  使用该国首都坐标：
+    KZ → 阿斯塔纳 (51.1605, 71.4704)
+    UZ → 塔什干 (41.2995, 69.2401)
+    KG → 比什凯克 (42.8746, 74.5698)
+    TJ → 杜尚别 (38.5598, 68.7870)
+    TM → 阿什哈巴德 (37.9601, 58.3261)
 
 输出 JSON 字段：
 - title_zh: 中文标题
 - summary_zh: 中文摘要 100-200 字
-- country: KZ/UZ/KG/TJ/TM 之一；不属于中亚返回 null
-- city: 城市中文名
+- country: KZ/UZ/KG/TJ/TM 之一；如果新闻不是主要关于中亚则返回 null
+- city: 城市中文名（具体城市或首都）
 - lat: 纬度（数字）
 - lng: 经度（数字）
 - confidence: 0-1 之间的小数
@@ -397,13 +417,28 @@ def llm_process(item: dict):
         except json.JSONDecodeError as je:
             log.error(f"LLM JSON 解析失败: {je}; 原文前 200 字: {text[:200]!r}")
             return None
-        if not data.get("country") or data["country"] not in ["KZ", "UZ", "KG", "TJ", "TM"]:
+        # 只在 country 不属于中亚时拒绝；其他都用兜底修正
+        country = data.get("country")
+        if not country or country not in COUNTRY_CAPITALS:
             return None
-        if data.get("confidence", 0) < 0.5:
+        # 置信度门槛降到 0.3（更宽容）
+        if data.get("confidence", 0) < 0.3:
             return None
+        # 地点兜底：如果坐标超出中亚 bbox，用该国首都覆盖
         b = CENTRAL_ASIA_BOUNDS
-        if not (b["lat_min"] <= data["lat"] <= b["lat_max"] and b["lng_min"] <= data["lng"] <= b["lng_max"]):
-            return None
+        try:
+            lat = float(data.get("lat", 0))
+            lng = float(data.get("lng", 0))
+            in_bbox = (b["lat_min"] <= lat <= b["lat_max"] and b["lng_min"] <= lng <= b["lng_max"])
+        except (TypeError, ValueError):
+            in_bbox = False
+        if not in_bbox:
+            cap = COUNTRY_CAPITALS[country]
+            data["lat"] = cap["lat"]
+            data["lng"] = cap["lng"]
+            # 坐标不在中亚时，城市名也用首都（原来的城市可能是事件发生地，比如"北京"）
+            data["city"] = cap["city"]
+            log.info(f"  地点兜底 → {country} 首都 {cap['city']}")
         return data
     except Exception as e:
         log.error(f"LLM 处理失败: {e}")
