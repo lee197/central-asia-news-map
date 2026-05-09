@@ -479,11 +479,10 @@
   };
 </script>
 <script>
-  // 动态加载高德地图（含 MarkerCluster 插件用于点位聚合）
+  // 动态加载高德地图主库
   (function() {
     var s = document.createElement('script');
-    s.src = 'https://webapi.amap.com/maps?v=2.0&key=' + window.APP_CONFIG.AMAP_KEY
-          + '&plugin=AMap.MarkerCluster';
+    s.src = 'https://webapi.amap.com/maps?v=2.0&key=' + window.APP_CONFIG.AMAP_KEY;
     document.head.appendChild(s);
   })();
 </script>
@@ -686,27 +685,37 @@
       return marker;
     });
 
-    // 用 MarkerCluster 把 markers 聚合
+    // 用 MarkerCluster 把 markers 聚合；失败则降级到单点
+    let clusterOk = false;
     if (typeof AMap.MarkerCluster === 'function') {
-      clusterer = new AMap.MarkerCluster(map, markers, {
-        gridSize: 60,            // 60 像素内的点合并
-        maxZoom: 11,             // 缩放到 11 级以上不再聚合
-        renderClusterMarker: (ctx) => {
-          ctx.marker.setContent(makeClusterContent(ctx.count, ctx.clusterData));
-          ctx.marker.setAnchor('center');
-        },
-      });
-      // 聚合点击：展示这堆新闻列表
-      clusterer.on('click', (ev) => {
-        if (ev.clusterData && ev.clusterData.length > 1) {
-          showClusterList(ev.clusterData, ev.lnglat);
-        } else if (ev.clusterData && ev.clusterData.length === 1) {
-          const news = ev.clusterData[0].getExtData().news;
-          if (news) focusNews(news.id);
-        }
-      });
+      try {
+        clusterer = new AMap.MarkerCluster(map, markers, {
+          gridSize: 60,
+          maxZoom: 11,
+          renderClusterMarker: (ctx) => {
+            try {
+              ctx.marker.setContent(makeClusterContent(ctx.count, ctx.clusterData));
+              ctx.marker.setAnchor('center');
+            } catch (e) { console.warn('cluster render err:', e); }
+          },
+        });
+        clusterer.on('click', (ev) => {
+          if (ev.clusterData && ev.clusterData.length > 1) {
+            showClusterList(ev.clusterData, ev.lnglat);
+          } else if (ev.clusterData && ev.clusterData.length === 1) {
+            const news = ev.clusterData[0].getExtData().news;
+            if (news) focusNews(news.id);
+          }
+        });
+        clusterOk = true;
+      } catch (e) {
+        console.error('MarkerCluster 初始化失败，降级到单点:', e);
+        clusterer = null;
+      }
     } else {
-      // 兜底：插件没加载就直接 add 单 marker
+      console.warn('AMap.MarkerCluster 未加载，降级到单点');
+    }
+    if (!clusterOk) {
       markers.forEach(m => map.add(m));
     }
   }
@@ -792,6 +801,14 @@
     return true;
   }
 
+  function loadPlugin(name) {
+    return new Promise(resolve => {
+      AMap.plugin([name], () => resolve(true));
+      // 5 秒超时兜底，没加载成功也别卡死
+      setTimeout(() => resolve(false), 5000);
+    });
+  }
+
   async function init() {
     const ok = await waitForAMap();
     if (!ok) {
@@ -804,6 +821,8 @@
       return;
     }
     initMap();
+    // 异步加载 MarkerCluster 插件（v2.0 推荐方式）
+    await loadPlugin('AMap.MarkerCluster');
     await loadNews();
     applyFilter();
     document.getElementById('loadingOverlay').classList.add('hidden');
