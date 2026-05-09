@@ -692,22 +692,49 @@
         clusterer = new AMap.MarkerCluster(map, markers, {
           gridSize: 60,
           maxZoom: 11,
+          // 自定义聚合点样式
           renderClusterMarker: (ctx) => {
-            try {
-              ctx.marker.setContent(makeClusterContent(ctx.count, ctx.clusterData));
-              ctx.marker.setAnchor('center');
-            } catch (e) { console.warn('cluster render err:', e); }
+            const count = ctx.count;
+            const items = ctx.clusterData || [];
+            // 计算主导国家色
+            const countryCount = {};
+            items.forEach(m => {
+              const c = m.getExtData && m.getExtData().news ? m.getExtData().news.country : null;
+              if (c) countryCount[c] = (countryCount[c] || 0) + 1;
+            });
+            let dominantCountry = 'KZ', max = 0;
+            for (const c in countryCount) {
+              if (countryCount[c] > max) { max = countryCount[c]; dominantCountry = c; }
+            }
+            const color = COUNTRY_COLORS[dominantCountry] || '#3B9EFF';
+            const size = Math.min(48, 24 + Math.log2(Math.max(2, count)) * 6);
+            const div = document.createElement('div');
+            div.style.cssText = `
+              width: ${size}px; height: ${size}px;
+              background: ${color}E0;
+              border: 2px solid #fff;
+              border-radius: 50%;
+              box-shadow: 0 0 0 3px ${color}40, 0 2px 8px rgba(0,0,0,0.5);
+              display: flex; align-items: center; justify-content: center;
+              color: #fff; font-weight: 700; font-size: 13px;
+              cursor: pointer; user-select: none;
+            `;
+            div.textContent = String(count);
+            ctx.marker.setContent(div);
+            ctx.marker.setOffset(new AMap.Pixel(-size/2, -size/2));
           },
         });
         clusterer.on('click', (ev) => {
           if (ev.clusterData && ev.clusterData.length > 1) {
             showClusterList(ev.clusterData, ev.lnglat);
           } else if (ev.clusterData && ev.clusterData.length === 1) {
-            const news = ev.clusterData[0].getExtData().news;
+            const m = ev.clusterData[0];
+            const news = m.getExtData ? m.getExtData().news : null;
             if (news) focusNews(news.id);
           }
         });
         clusterOk = true;
+        console.log(`[cluster] 创建成功，${markers.length} 个 markers 进入聚合器`);
       } catch (e) {
         console.error('MarkerCluster 初始化失败，降级到单点:', e);
         clusterer = null;
@@ -716,6 +743,7 @@
       console.warn('AMap.MarkerCluster 未加载，降级到单点');
     }
     if (!clusterOk) {
+      console.log(`[fallback] 降级，直接 add ${markers.length} 个单 marker`);
       markers.forEach(m => map.add(m));
     }
   }
