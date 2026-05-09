@@ -685,44 +685,14 @@
       return marker;
     });
 
-    // 用 MarkerCluster 把 markers 聚合；失败则降级到单点
+    // 用 MarkerCluster 聚合 markers；用默认样式（避免 renderClusterMarker 回调问题）
     let clusterOk = false;
     if (typeof AMap.MarkerCluster === 'function') {
       try {
         clusterer = new AMap.MarkerCluster(map, markers, {
           gridSize: 60,
           maxZoom: 11,
-          // 自定义聚合点样式
-          renderClusterMarker: (ctx) => {
-            const count = ctx.count;
-            const items = ctx.clusterData || [];
-            // 计算主导国家色
-            const countryCount = {};
-            items.forEach(m => {
-              const c = m.getExtData && m.getExtData().news ? m.getExtData().news.country : null;
-              if (c) countryCount[c] = (countryCount[c] || 0) + 1;
-            });
-            let dominantCountry = 'KZ', max = 0;
-            for (const c in countryCount) {
-              if (countryCount[c] > max) { max = countryCount[c]; dominantCountry = c; }
-            }
-            const color = COUNTRY_COLORS[dominantCountry] || '#3B9EFF';
-            const size = Math.min(48, 24 + Math.log2(Math.max(2, count)) * 6);
-            const div = document.createElement('div');
-            div.style.cssText = `
-              width: ${size}px; height: ${size}px;
-              background: ${color}E0;
-              border: 2px solid #fff;
-              border-radius: 50%;
-              box-shadow: 0 0 0 3px ${color}40, 0 2px 8px rgba(0,0,0,0.5);
-              display: flex; align-items: center; justify-content: center;
-              color: #fff; font-weight: 700; font-size: 13px;
-              cursor: pointer; user-select: none;
-            `;
-            div.textContent = String(count);
-            ctx.marker.setContent(div);
-            ctx.marker.setOffset(new AMap.Pixel(-size/2, -size/2));
-          },
+          // 不传 renderClusterMarker，用 AMap 默认蓝色圈样式
         });
         clusterer.on('click', (ev) => {
           if (ev.clusterData && ev.clusterData.length > 1) {
