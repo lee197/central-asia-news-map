@@ -785,32 +785,108 @@
     map.on('click', () => infoWindow.close());
   }
 
+  // 国内无 VPN 时的兜底 mock 数据（覆盖五国主要城市，含两种视角）
+  const MOCK_NEWS = [
+    { id: 'm1', country: 'KZ', city: '阿斯塔纳', lat: 51.1694, lng: 71.4491,
+      title_zh: '哈萨克斯坦总统宣布新一轮稀土战略合作',
+      summary_zh: '阿斯塔纳与多国签署稀土开采与加工合作备忘录，预计将推动本国产业链升级，并吸引海外投资。',
+      source_name: 'Astana Times', source_url: 'https://astanatimes.com', perspective: 'western',
+      published_at: new Date(Date.now() - 2*3600*1000).toISOString() },
+    { id: 'm2', country: 'KZ', city: '阿拉木图', lat: 43.2389, lng: 76.8897,
+      title_zh: '阿拉木图地铁延伸线开通运营',
+      summary_zh: '新开通段连接城市南郊主要居民区与商务中心，预计日均客流增加 12 万人次。',
+      source_name: 'Tengrinews', source_url: 'https://tengrinews.kz', perspective: 'local',
+      published_at: new Date(Date.now() - 5*3600*1000).toISOString() },
+    { id: 'm3', country: 'UZ', city: '塔什干', lat: 41.2995, lng: 69.2401,
+      title_zh: '乌兹别克斯坦推进数字政府改革',
+      summary_zh: '塔什干启动新一轮电子政务平台升级，涵盖税务、社保、营业执照在内的 30 余项服务转向线上办理。',
+      source_name: 'Gazeta.uz', source_url: 'https://gazeta.uz', perspective: 'local',
+      published_at: new Date(Date.now() - 1*3600*1000).toISOString() },
+    { id: 'm4', country: 'UZ', city: '撒马尔罕', lat: 39.6542, lng: 66.9597,
+      title_zh: '撒马尔罕修复历史古城迎来旅游高峰',
+      summary_zh: '丝绸之路重要节点撒马尔罕完成核心古迹群修复，今年游客数量同比增长 35%。',
+      source_name: 'The Diplomat', source_url: 'https://thediplomat.com', perspective: 'western',
+      published_at: new Date(Date.now() - 12*3600*1000).toISOString() },
+    { id: 'm5', country: 'KG', city: '比什凯克', lat: 42.8746, lng: 74.5698,
+      title_zh: '吉尔吉斯斯坦议会通过新水资源管理法',
+      summary_zh: '比什凯克通过的法案旨在缓解中亚跨境水资源紧张局势，重点保护伊塞克湖流域生态。',
+      source_name: '24.kg', source_url: 'https://24.kg', perspective: 'local',
+      published_at: new Date(Date.now() - 8*3600*1000).toISOString() },
+    { id: 'm6', country: 'KG', city: '奥什', lat: 40.5283, lng: 72.7985,
+      title_zh: '奥什边境贸易额创历史新高',
+      summary_zh: '吉尔吉斯斯坦南部城市奥什与邻国边贸额同比增长 40%，纺织品与农产品为主要出口商品。',
+      source_name: 'Eurasianet', source_url: 'https://eurasianet.org', perspective: 'western',
+      published_at: new Date(Date.now() - 18*3600*1000).toISOString() },
+    { id: 'm7', country: 'TJ', city: '杜尚别', lat: 38.5598, lng: 68.7870,
+      title_zh: '塔吉克斯坦水电出口达成新协议',
+      summary_zh: '杜尚别与南亚邻国签署长期电力输出协议，罗贡水电站将成为主要供电源。',
+      source_name: 'Asia-Plus', source_url: 'https://asiaplustj.info', perspective: 'local',
+      published_at: new Date(Date.now() - 6*3600*1000).toISOString() },
+    { id: 'm8', country: 'TJ', city: '苦盏', lat: 40.2837, lng: 69.6219,
+      title_zh: '苦盏工业园引入新能源汽车组装线',
+      summary_zh: '塔吉克斯坦北部工业重镇苦盏与外资合作建设电动车组装基地，预计明年投产。',
+      source_name: 'Times of Central Asia', source_url: 'https://timesca.com', perspective: 'western',
+      published_at: new Date(Date.now() - 26*3600*1000).toISOString() },
+    { id: 'm9', country: 'TM', city: '阿什哈巴德', lat: 37.9601, lng: 58.3261,
+      title_zh: '土库曼斯坦扩大天然气出口管道布局',
+      summary_zh: '阿什哈巴德宣布与多国推进新天然气管道项目，目标是降低对单一买家的依赖。',
+      source_name: 'bne IntelliNews', source_url: 'https://intellinews.com', perspective: 'western',
+      published_at: new Date(Date.now() - 30*3600*1000).toISOString() },
+    { id: 'm10', country: 'TM', city: '土库曼巴希', lat: 40.0228, lng: 53.0091,
+      title_zh: '土库曼巴希港口扩建工程动工',
+      summary_zh: '里海沿岸港口城市土库曼巴希启动新一期港口扩建，将提升跨里海集装箱吞吐能力。',
+      source_name: 'Turkmenistan.gov', source_url: 'https://turkmenistan.gov.tm', perspective: 'local',
+      published_at: new Date(Date.now() - 14*3600*1000).toISOString() },
+    { id: 'm11', country: 'KZ', city: '阿斯塔纳', lat: 51.1694, lng: 71.4491,
+      title_zh: '哈萨克斯坦举办上合组织峰会筹备会议',
+      summary_zh: '阿斯塔纳召开会议讨论下届上合峰会议程，区域安全与能源合作成为核心议题。',
+      source_name: 'Kazinform', source_url: 'https://kazinform.kz', perspective: 'local',
+      published_at: new Date(Date.now() - 4*3600*1000).toISOString() },
+    { id: 'm12', country: 'UZ', city: '塔什干', lat: 41.2995, lng: 69.2401,
+      title_zh: '美国宣布扩大对乌兹别克斯坦农业技术援助',
+      summary_zh: '华盛顿宣布向乌兹别克斯坦提供新一轮农业现代化技术合作，重点支持滴灌与节水种植。',
+      source_name: 'The Diplomat', source_url: 'https://thediplomat.com', perspective: 'western',
+      published_at: new Date(Date.now() - 9*3600*1000).toISOString() }
+  ];
+
+  function useMock(reason) {
+    NEWS_DATA = MOCK_NEWS.map(n => ({
+      id: n.id, country: n.country, city: n.city, lat: n.lat, lng: n.lng,
+      title_zh: n.title_zh, summary_zh: n.summary_zh,
+      source: n.source_name, source_url: n.source_url,
+      published_at: n.published_at, perspective: n.perspective || 'local'
+    }));
+    const updateEl = document.getElementById('updateInfo');
+    if (updateEl) updateEl.textContent = '📦 演示模式 · ' + NEWS_DATA.length + ' 条新闻';
+    console.warn('[mock] 使用内置演示数据，原因:', reason);
+  }
+
   async function loadNews() {
+    const base = window.APP_CONFIG.API_BASE || '';
+    if (!base) {
+      // 没配 API_BASE,直接用 mock(也支持双击本地 HTML 演示)
+      useMock('未配置 API_BASE');
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
     try {
-      const base = window.APP_CONFIG.API_BASE || '';
-      const resp = await fetch(base + '/api/news?days=7&limit=500');
+      const resp = await fetch(base + '/api/news?days=7&limit=500', { signal: controller.signal });
+      clearTimeout(timer);
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
+      if (!data.items || data.items.length === 0) throw new Error('empty');
       NEWS_DATA = data.items.map(n => ({
-        id: n.id,
-        country: n.country,
-        city: n.city,
-        lat: n.lat,
-        lng: n.lng,
-        title_zh: n.title_zh,
-        summary_zh: n.summary_zh,
-        source: n.source_name,
-        source_url: n.source_url,
-        published_at: n.published_at,
-        perspective: n.perspective || 'local'
+        id: n.id, country: n.country, city: n.city, lat: n.lat, lng: n.lng,
+        title_zh: n.title_zh, summary_zh: n.summary_zh,
+        source: n.source_name, source_url: n.source_url,
+        published_at: n.published_at, perspective: n.perspective || 'local'
       }));
       const updateEl = document.getElementById('updateInfo');
       if (updateEl) updateEl.textContent = '🔄 共 ' + NEWS_DATA.length + ' 条新闻';
     } catch (e) {
-      console.error('加载新闻失败:', e);
-      const updateEl = document.getElementById('updateInfo');
-      if (updateEl) updateEl.textContent = '⚠ 加载失败：' + e.message;
-      NEWS_DATA = [];
+      clearTimeout(timer);
+      useMock(e.name === 'AbortError' ? '请求超时(1.5s)' : e.message);
     }
   }
 
