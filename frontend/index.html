@@ -866,14 +866,27 @@
     const news = NEWS_DATA.find(n => String(n.id) === String(id));
     if (!news) return;
     activeId = news.id;
-    map.setZoomAndCenter(7, [news.lng, news.lat], false, 400);
-    infoWindow.setContent(makeInfoCard(news));
-    infoWindow.open(map, [news.lng, news.lat]);
+    lastFocusAt = Date.now();
     document.querySelectorAll('.news-item').forEach(el => {
       el.classList.toggle('active', String(el.dataset.id) === String(news.id));
     });
     const activeEl = document.querySelector(`.news-item[data-id="${id}"]`);
     if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    const openInfo = () => {
+      lastFocusAt = Date.now();
+      map.setZoomAndCenter(7, [news.lng, news.lat], false, 400);
+      infoWindow.setContent(makeInfoCard(news));
+      infoWindow.open(map, [news.lng, news.lat]);
+    };
+
+    // 手机端:如果抽屉开着,先关抽屉、等过渡结束再聚焦,避免地图被遮+被误关
+    if (isMobile() && document.getElementById('newsPanel').classList.contains('open')) {
+      closeNewsPanel();
+      setTimeout(openInfo, 300);
+    } else {
+      openInfo();
+    }
   }
 
   function applyFilter() {
@@ -902,8 +915,13 @@
       offset: new AMap.Pixel(0, -16),
       autoMove: true
     });
-    map.on('click', () => infoWindow.close());
+    // 防止 focusNews 刚打开 InfoWindow 就被地图 click 事件关掉
+    map.on('click', () => {
+      if (Date.now() - lastFocusAt < 600) return;
+      infoWindow.close();
+    });
   }
+  let lastFocusAt = 0;
 
   // 国内无 VPN 时的兜底 mock 数据（覆盖五国主要城市，含两种视角）
   const MOCK_NEWS = [
@@ -1093,12 +1111,7 @@
   document.getElementById('mobileFab').addEventListener('click', openNewsPanel);
   document.getElementById('newsPanelClose').addEventListener('click', closeNewsPanel);
 
-  // 点击新闻项后,在手机上自动收起抽屉(让用户看到地图)
-  document.getElementById('newsList').addEventListener('click', e => {
-    if (e.target.closest('.news-item') && isMobile()) {
-      setTimeout(closeNewsPanel, 200);
-    }
-  });
+  // 关闭抽屉由 focusNews 内部处理(避免竞态),这里不再额外触发
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
